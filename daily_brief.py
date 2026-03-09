@@ -244,7 +244,15 @@ def send_slack_dm(blocks):
         json={"users": SLACK_USER_ID},
     )
     response.raise_for_status()
-    channel_id = response.json()["channel"]["id"]
+    data = response.json()
+
+    # Check for Slack API errors
+    if not data.get("ok"):
+        print(f"❌ Slack error opening DM: {data.get('error', 'unknown error')}")
+        print(f"   Full response: {data}")
+        return
+
+    channel_id = data["channel"]["id"]
 
     # Send the message
     response = requests.post(
@@ -253,11 +261,13 @@ def send_slack_dm(blocks):
         json={"channel": channel_id, "blocks": blocks, "text": "☀️ Your Daily Brief"},
     )
     response.raise_for_status()
+    data = response.json()
 
-    if response.json().get("ok"):
+    if data.get("ok"):
         print("✅ Daily brief sent successfully!")
     else:
-        print(f"❌ Error: {response.json().get('error')}")
+        print(f"❌ Slack error sending message: {data.get('error', 'unknown error')}")
+        print(f"   Full response: {data}")
 
 
 # ============================================
