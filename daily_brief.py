@@ -25,7 +25,7 @@ TALENT_CHANNELS = {
 }
 
 # React-based save emoji (without colons)
-SAVE_EMOJI = "bookmark"  # 🔖
+SAVE_EMOJI = "reminder"  # 🔖
 
 # User name cache (populated lazily)
 _user_cache = {}
