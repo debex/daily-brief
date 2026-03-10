@@ -22,6 +22,8 @@ TALENT_CHANNELS = {
     "C072E3BBSVC": "#talent-recruiting-and-operations",
     "C0A4MSN40RF": "#referrals-talent",
     "CUYUC6CGJ": "#talent",
+    "C02ETD55JP3": "#talent-operations-team",
+    "C0AFECA0GUA": "#talentops-scede",    
 }
 
 # React-based save emoji (without colons)
