@@ -11,36 +11,31 @@ from googleapiclient.discovery import build
 # Configuration (pulled from GitHub Secrets)
 # ============================================
 LINEAR_API_KEY = os.environ["LINEAR_API_KEY"]
+LINEAR_TEAM_KEY = os.environ.get("LINEAR_TEAM_KEY", "PMK")
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 SLACK_USER_ID = os.environ["SLACK_USER_ID"]
 SLACK_USER_TOKEN = os.environ.get("SLACK_USER_TOKEN", "")
 GOOGLE_CALENDAR_CREDENTIALS = os.environ.get("GOOGLE_CALENDAR_CREDENTIALS", "")
 GOOGLE_CALENDAR_ID = os.environ.get("GOOGLE_CALENDAR_ID", "primary")
 
-# Talent channel IDs to summarize
-TALENT_CHANNELS = {
-    "C072E3BBSVC": "#talent-recruiting-and-operations",
-    "C0A4MSN40RF": "#referrals-talent",
-    "CUYUC6CGJ": "#talent",
-    "C02ETD55JP3": "#talent-operations-team",
-    "C0AFECA0GUA": "#talentops-scede",    
-}
+# Channel config from environment (JSON string: {"CHANNEL_ID": "#channel-name", ...})
+SLACK_CHANNELS = json.loads(os.environ.get("SLACK_CHANNELS", "{}"))
 
 # React-based save emoji (without colons)
-SAVE_EMOJI = "reminder"  # 🔖
+SAVE_EMOJI = os.environ.get("SAVE_EMOJI", "bookmark")
 
 # User name cache (populated lazily)
 _user_cache = {}
 
 
 # ============================================
-# 1. Fetch Linear PMK Issues
+# 1. Fetch Linear Issues
 # ============================================
 def fetch_linear_issues():
-    """Fetch In Progress and Todo issues from PMK team."""
+    """Fetch In Progress and Todo issues from your team."""
     query = """
-    query {
-        teams(filter: { key: { eq: "PMK" } }) {
+    query($teamKey: String!) {
+        teams(filter: { key: { eq: $teamKey } }) {
             nodes {
                 id
                 name
@@ -76,7 +71,7 @@ def fetch_linear_issues():
             "Authorization": LINEAR_API_KEY,
             "Content-Type": "application/json",
         },
-        json={"query": query},
+        json={"query": query, "variables": {"teamKey": LINEAR_TEAM_KEY}},
     )
 
     print(f"   Linear API status code: {response.status_code}")
@@ -250,13 +245,8 @@ def humanize_slack_text(text):
         name = resolve_slack_user(user_id)
         return f"*{name}*"
 
-    # Replace user mentions: <@U12345> → *Display Name*
     text = re.sub(r"<@(U[A-Z0-9]+)>", replace_user_mention, text)
-
-    # Replace channel mentions: <#C12345|channel-name> → #channel-name
     text = re.sub(r"<#C[A-Z0-9]+\|([^>]+)>", r"#\1", text)
-
-    # Replace URLs: <https://example.com|label> → label, <https://example.com> → URL
     text = re.sub(r"<(https?://[^|>]+)\|([^>]+)>", r"\2", text)
     text = re.sub(r"<(https?://[^>]+)>", r"\1", text)
 
@@ -264,10 +254,10 @@ def humanize_slack_text(text):
 
 
 # ============================================
-# 3c. Fetch Talent Channel Summaries
+# 3c. Fetch Channel Summaries
 # ============================================
-def fetch_talent_channel_summaries():
-    """Fetch messages from the past 24 hours in each talent channel."""
+def fetch_channel_summaries():
+    """Fetch messages from the past 24 hours in each configured channel."""
     headers = {
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json",
@@ -276,7 +266,7 @@ def fetch_talent_channel_summaries():
     oldest = (datetime.now(timezone.utc) - timedelta(hours=24)).timestamp()
     summaries = {}
 
-    for channel_id, channel_name in TALENT_CHANNELS.items():
+    for channel_id, channel_name in SLACK_CHANNELS.items():
         try:
             response = requests.get(
                 "https://slack.com/api/conversations.history",
@@ -396,7 +386,7 @@ def fetch_saved_reactions():
                 "channel": channel_label,
             })
 
-        print(f"   Found {len(saved)} 🔖 saved messages in last 24h")
+        print(f"   Found {len(saved)} saved messages in last 24h")
         return saved
 
     except Exception as e:
@@ -424,7 +414,7 @@ def build_message(in_progress, todo, calendar_events, slack_highlights, channel_
 
     # --- In Progress ---
     if in_progress:
-        text = "*🔥 In Progress (PMK)*\n"
+        text = "*🔥 In Progress*\n"
         for item in in_progress[:7]:
             emoji = priority_emoji(item["priority"])
             text += f"  {emoji} <{item['url']}|{item['id']}>: {item['title']}\n"
@@ -432,7 +422,7 @@ def build_message(in_progress, todo, calendar_events, slack_highlights, channel_
 
     # --- Todo ---
     if todo:
-        text = "*📋 Up Next (PMK Todo)*\n"
+        text = "*📋 Up Next (Todo)*\n"
         for item in todo[:7]:
             emoji = priority_emoji(item["priority"])
             text += f"  {emoji} <{item['url']}|{item['id']}>: {item['title']}\n"
@@ -468,7 +458,7 @@ def build_message(in_progress, todo, calendar_events, slack_highlights, channel_
         text += f"  • {slack_highlights['unread_dms']} unread DM conversations\n"
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
 
-    # --- 🔖 Saved for Later ---
+    # --- Saved for Later ---
     if saved_items:
         text = "*🔖 Saved for Later (last 24h)*\n"
         for item in saved_items:
@@ -488,9 +478,9 @@ def build_message(in_progress, todo, calendar_events, slack_highlights, channel_
 
     blocks.append({"type": "divider"})
 
-    # --- Talent Channel Summaries ---
+    # --- Channel Summaries ---
     if channel_summaries:
-        text = "*📢 Talent Channel Activity (last 24h)*\n"
+        text = "*📢 Channel Activity (last 24h)*\n"
         for channel_name, info in channel_summaries.items():
             count = info["count"]
             if info.get("error"):
@@ -562,7 +552,7 @@ def send_slack_dm(blocks):
 # Main
 # ============================================
 if __name__ == "__main__":
-    print("📋 Fetching Linear PMK issues...")
+    print("📋 Fetching Linear issues...")
     in_progress, todo = fetch_linear_issues()
     print(f"   Found {len(in_progress)} in progress, {len(todo)} todo")
 
@@ -575,8 +565,8 @@ if __name__ == "__main__":
     print("🔖 Fetching saved reactions...")
     saved_items = fetch_saved_reactions()
 
-    print("📢 Fetching talent channel summaries...")
-    channel_summaries = fetch_talent_channel_summaries()
+    print("📢 Fetching channel summaries...")
+    channel_summaries = fetch_channel_summaries()
 
     print("📨 Building and sending daily brief...")
     blocks = build_message(
