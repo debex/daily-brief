@@ -44,6 +44,9 @@ def fetch_linear_issues():
                         state: {
                             type: { in: ["started", "unstarted"] }
                         }
+                        assignee: {
+                            isMe: { eq: true }
+                        }
                     }
                     orderBy: updatedAt
                     first: 50
